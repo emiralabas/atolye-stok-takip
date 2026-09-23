@@ -1,0 +1,102 @@
+import sqlite3
+import pandas as pd
+import streamlit as st
+
+# 1. Veritabanı Bağlantısı ve Tablo Oluşturma
+conn = sqlite3.connect("atolye_stok.db", check_same_thread=False)
+cursor = conn.cursor()
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS stok (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    box_no TEXT NOT NULL,
+    komponent_adi TEXT NOT NULL,
+    kategori TEXT,
+    miktar INTEGER DEFAULT 0,
+    aciklama TEXT
+)
+""")
+conn.commit()
+
+# Sayfa Ayarları
+st.set_page_config(page_title="Ar-Ge Atölye Stok Takibi", layout="wide")
+st.title("📦 Ar-Ge Atölyesi Komponent Takip Sistemi")
+
+# Sol Menü (Navigasyon)
+menu = st.sidebar.selectbox("İşlem Seçin", ["Yeni Komponent Ekle", "Stok Listesi ve Arama", "Stok Güncelle / Sil"])
+
+# --- MODÜL 1: YENİ KOMPONENT EKLE ---
+if menu == "Yeni Komponent Ekle":
+    st.subheader("➕ Kutuyu Numaralandır ve Komponent Ekle")
+
+    with st.form("ekle_formu", clear_on_submit=True):
+        col1, col2 = st.columns(2)
+
+        with col1:
+            box_no = st.text_input("Box / Kutu Numarası *", placeholder="Örn: 1 veya ORG1-A3")
+            komponent_adi = st.text_input("Komponent Adı *", placeholder="Örn: 1k ohm direnç")
+            kategori = st.selectbox("Kategori", ["Direnç", "Kondansatör", "Entegre / Mikrodenetleyici", "Transistör / Diyot", "Konnektör / Kablo", "Sensör", "Diğer"])
+
+        with col2:
+            miktar = st.number_input("Adet / Miktar *", min_value=1, value=10, step=1)
+            aciklama = st.text_area("Açıklama / Notlar", placeholder="Örn: 0805 kılıf, %1 toleranslı")
+
+        submit_button = st.form_submit_dict = st.form_submit_button("Veritabanına Kaydet")
+
+        if submit_button:
+            if not box_no or not komponent_adi:
+                st.error("Lütfen Kutu Numarası ve Komponent Adı alanlarını doldurun!")
+            else:
+                cursor.execute("""
+                    INSERT INTO stok (box_no, komponent_adi, kategori, miktar, aciklama)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (box_no, komponent_adi, kategori, miktar, aciklama))
+                conn.commit()
+                st.success(f"✅ **{box_no}** numaralı kutuya **{miktar} adet {komponent_adi}** başarıyla eklendi!")
+
+# --- MODÜL 2: STOK LİSTESİ VE ARAMA ---
+elif menu == "Stok Listesi ve Arama":
+    st.subheader("🔍 Stok Arama ve Kutu Sorgulama")
+
+    arama_termi = st.text_input("Kutu No veya Komponent Adı ile Ara...", "")
+
+    if arama_termi:
+        query = "SELECT box_no as 'Kutu No', komponent_adi as 'Komponent', kategori as 'Kategori', miktar as 'Miktar', aciklama as 'Açıklama' FROM stok WHERE box_no LIKE ? OR komponent_adi LIKE ?"
+        df = pd.read_sql_query(query, conn, params=(f"%{arama_termi}%", f"%{arama_termi}%"))
+    else:
+        query = "SELECT box_no as 'Kutu No', komponent_adi as 'Komponent', kategori as 'Kategori', miktar as 'Miktar', aciklama as 'Açıklama' FROM stok"
+        df = pd.read_sql_query(query, conn)
+
+    st.dataframe(df, use_container_width=True)
+
+# --- MODÜL 3: STOK GÜNCELLE VEYA SİL ---
+elif menu == "Stok Güncelle / Sil":
+    st.subheader("✏️ Veri Düzenleme")
+    
+    # Tüm verileri getir
+    df_tum = pd.read_sql_query("SELECT * FROM stok", conn)
+    
+    if not df_tum.empty:
+        secilen_id = st.selectbox("Düzenlenecek Komponenti Seçin", df_tum["id"].tolist(), format_func=lambda x: f"ID: {x} | Box: {df_tum[df_tum['id']==x]['box_no'].values[0]} - {df_tum[df_tum['id']==x]['komponent_adi'].values[0]}")
+        
+        kayit = df_tum[df_tum["id"] == secilen_id].iloc[0]
+        
+        yeni_miktari = st.number_input("Yeni Stok Miktarı", value=int(kayit["miktar"]))
+        
+        col_guncelle, col_sil = st.columns(2)
+        
+        with col_guncelle:
+            if st.button("Miktarı Güncelle"):
+                cursor.execute("UPDATE stok SET miktar = ? WHERE id = ?", (yeni_miktari, secilen_id))
+                conn.commit()
+                st.success("Stok miktarı güncellendi!")
+                st.rerun()
+                
+        with col_sil:
+            if st.button("Kaydı Sil", type="primary"):
+                cursor.execute("DELETE FROM stok WHERE id = ?", (secilen_id,))
+                conn.commit()
+                st.warning("Kayıt veritabanından silindi!")
+                st.rerun()
+    else:
+        st.info("Veritabanında henüz kayıtlı ürün yok.")
