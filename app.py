@@ -2,17 +2,48 @@ import pandas as pd
 import streamlit as st
 from supabase import create_client
 
-# Streamlit Secrets üzerinden Supabase bağlantısı
+# Streamlit Secrets üzerinden Supabase ve Şifre Bağlantısı
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+APP_PASSWORD = st.secrets.get("APP_PASSWORD", "1234")  # Varsayılan şifre
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # Sayfa Ayarları
-st.set_page_config(page_title="Ar-Ge Atölye Stok Takibi", layout="wide")
-st.title("📦 Ar-Ge Atölyesi Komponent Takip Sistemi (Supabase)")
+st.set_page_config(
+    page_title="Ar-Ge Atölye Stok Takibi", layout="wide", page_icon="📦"
+)
 
-# Sol Menü
+# --- ŞİFRE İLE GİRİŞ KONTROLÜ ---
+if "logged_in" not in st.session_state:
+    st.session_state["logged_in"] = False
+
+if not st.session_state["logged_in"]:
+    st.title("🔒 Ar-Ge Atölye Stok Sistemi Girişi")
+    
+    with st.form("login_form"):
+        girilen_sifre = st.text_input("Giriş Şifresi", type="password")
+        submit = st.form_submit_button("Giriş Yap")
+        
+        if submit:
+            if girilen_sifre == APP_PASSWORD:
+                st.session_state["logged_in"] = True
+                st.success("Giriş başarılı!")
+                st.rerun()
+            else:
+                st.error("Hatalı şifre! Lütfen tekrar deneyin.")
+    
+    # Şifre girilmediyse kodun geri kalanını çalıştırma (durdur)
+    st.stop()
+
+# --- GİRİŞ BAŞARILI İSE AŞAĞIDAKİ ANA UYGULAMA ÇALIŞIR ---
+
+# Sol Menüye Çıkış Yap Butonu Ekleme
+st.sidebar.title("📦 Stok Takip")
+if st.sidebar.button("🚪 Çıkış Yap"):
+    st.session_state["logged_in"] = False
+    st.rerun()
+
 menu = st.sidebar.selectbox(
     "İşlem Seçin",
     ["Yeni Komponent Ekle", "Stok Listesi ve Arama", "Stok Güncelle / Sil"],
@@ -58,8 +89,7 @@ if menu == "Yeni Komponent Ekle":
         if submit_button:
             if not box_no or not komponent_adi:
                 st.error(
-                    "Lütfen Kutu Numarası ve Komponent Adı alanlarını"
-                    " doldurun!"
+                    "Lütfen Kutu Numarası ve Komponent Adı alanlarını doldurun!"
                 )
             else:
                 data = {
@@ -71,8 +101,7 @@ if menu == "Yeni Komponent Ekle":
                 }
                 supabase.table("stok").insert(data).execute()
                 st.success(
-                    f"✅ **{box_no}** numaralı kutuya **{miktar} adet"
-                    f" {komponent_adi}** eklendi!"
+                    f"✅ **{box_no}** numaralı kutuya **{miktar} adet {komponent_adi}** eklendi!"
                 )
 
 # --- MODÜL 2: STOK LİSTESİ VE ARAMA ---
@@ -81,13 +110,11 @@ elif menu == "Stok Listesi ve Arama":
 
     arama_termi = st.text_input("Kutu No veya Komponent Adı ile Ara...", "")
 
-    # Verileri Supabase'den Çek
     response = supabase.table("stok").select("*").execute()
     data = response.data
 
     if data:
         df = pd.DataFrame(data)
-        # Sütunları düzenle
         df = df[
             ["id", "box_no", "komponent_adi", "kategori", "miktar", "aciklama"]
         ]
